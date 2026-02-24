@@ -68,13 +68,15 @@ Read the journey file and verify that any fragment imports resolve to existing f
 
 ### 3. Run the Journey
 
-Execute the journey with Playwright:
+Execute the journey with Playwright using the local binary (avoids `npx` startup overhead):
 
 ```sh
-npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
+./node_modules/.bin/playwright test --config lantern/playwright.config.ts --project=chromium lantern/journeys/[filename]
 ```
 
-Run this command from the project root.
+Run this command from the project root. The `--project=chromium` flag skips project matching and goes straight to launch.
+
+**Note on path resolution:** The Playwright config sets `testDir: './journeys'` (relative to the config file). When passing a journey file on the CLI, use the full path from the project root (`lantern/journeys/[filename]`). Playwright resolves the CLI path independently of `testDir`, so both work together correctly. Do **not** pass just the filename without the directory prefix.
 
 What happens during the run:
 
@@ -83,6 +85,14 @@ What happens during the run:
 - At each `checkpoint()` call, the terminal shows the checkpoint label and description, then `page.pause()` activates the Playwright Inspector
 - The user inspects the browser, then clicks the resume button in the Playwright Inspector to continue
 - The journey proceeds through all checkpoints until completion
+
+**Skipping to a specific checkpoint:** If the user only wants to see a particular checkpoint (e.g., "just show me checkpoint 3"), use Playwright's `--grep` flag with the checkpoint label:
+
+```sh
+./node_modules/.bin/playwright test --config lantern/playwright.config.ts --project=chromium --grep "Validation errors" lantern/journeys/[filename]
+```
+
+This only works if the journey is structured as multiple `test()` blocks. For single-test journeys (the default template), suggest the user that you can temporarily comment out earlier checkpoints for a faster iteration cycle, then restore them before committing.
 
 Let the test run to completion. Do not interrupt it.
 
@@ -103,7 +113,7 @@ Do **not** ask the user to debug. Handle it automatically:
 2. **Reproduce headlessly:** Re-run the journey in headless mode to capture the full error output without making the user sit through it:
 
    ```sh
-   LANTERN_HEADLESS=1 npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
+   LANTERN_HEADLESS=1 ./node_modules/.bin/playwright test --config lantern/playwright.config.ts --project=chromium lantern/journeys/[filename]
    ```
 
 3. **Analyze and fix:** Read the error output and diagnose the issue. Common patterns:
@@ -116,7 +126,13 @@ Do **not** ask the user to debug. Handle it automatically:
 
 4. **Verify headlessly:** Re-run in headless mode (`LANTERN_HEADLESS=1`) to confirm the fix works. If it still fails, repeat the analyze-and-fix cycle.
 
-5. **Re-launch headed:** Once the test passes headlessly, re-run in normal headed mode so the user sees the working journey in the browser.
+5. **Maximum 3 debug attempts.** If the journey still fails after 3 fix-and-retry cycles, stop and inform the user:
+
+   > "The journey is still failing after 3 debug attempts. Here's the latest error: [error]. This may be an issue with the app rather than the journey. Here's what I tried: [summary of fixes attempted]."
+
+   Do not loop indefinitely. Let the user decide how to proceed.
+
+6. **Re-launch headed:** Once the test passes headlessly, re-run in normal headed mode so the user sees the working journey in the browser.
 
 The key principle: the user should never sit through debugging. The agent handles all debugging iterations in headless mode and only re-launches the headed browser once everything works.
 
@@ -134,16 +150,7 @@ The journey references a fragment file that does not exist. Either create the fr
 Playwright Inspector requires a headed browser. Verify that `headless: false` is set in the Playwright config. Also ensure `PWDEBUG` is not set to `0` in the environment, as that disables the inspector.
 
 **"Test timed out"**
-The default timeout may be too short for journeys with many checkpoints (each checkpoint waits for user interaction). Increase the timeout in `lantern/playwright.config.ts`:
-
-```typescript
-export default defineConfig({
-  timeout: 0, // no timeout — user controls pacing via checkpoints
-  // ...
-});
-```
-
-Also check that dev servers are responding — a slow or unresponsive server can cause navigation timeouts before the first checkpoint is reached.
+The default config uses `timeout: 0` in headed mode (no timeout, since checkpoints wait for user interaction) and `timeout: 30_000` in headless mode. If you're hitting timeouts in headed mode, verify that `LANTERN_HEADLESS` is not set in your environment. For headless pre-flight timeouts, check that dev servers are responding — a slow or unresponsive server can cause navigation timeouts before the first checkpoint is reached.
 
 **"Error: browserType.launch: Executable doesn't exist"**
 Chromium is not installed. Run:

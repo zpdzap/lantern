@@ -84,18 +84,26 @@ async function waitForReady(url: string, timeoutMs = 30_000): Promise<void> {
 
 async function globalSetup(config: FullConfig) {
   // Replace with actual start commands and ports from the user
-  const backend = spawn('npm', ['run', 'dev:backend'], { stdio: 'pipe', shell: true });
+  // detached: true creates a process group so teardown can kill the entire tree
+  const backend = spawn('npm', ['run', 'dev:backend'], {
+    stdio: 'pipe', shell: true, detached: true,
+  });
   servers.push(backend);
   await waitForReady('http://localhost:8080/health');
 
-  const frontend = spawn('npm', ['run', 'dev:frontend'], { stdio: 'pipe', shell: true });
+  const frontend = spawn('npm', ['run', 'dev:frontend'], {
+    stdio: 'pipe', shell: true, detached: true,
+  });
   servers.push(frontend);
   await waitForReady(config.projects[0].use.baseURL || 'http://localhost:3000');
 }
 
 async function globalTeardown() {
   for (const proc of servers) {
-    proc.kill('SIGTERM');
+    // Kill the entire process group (negative PID) to catch child processes
+    if (proc.pid) {
+      try { process.kill(-proc.pid, 'SIGTERM'); } catch {}
+    }
   }
 }
 
@@ -126,7 +134,7 @@ async function globalSetup(config: FullConfig) {
 export default globalSetup;
 ```
 
-In both cases, add `globalSetup: './setup.ts'` to the Playwright config (and `globalTeardown` for the managed variant).
+In both cases, add `globalSetup: './setup.ts'` to the Playwright config. For the managed variant, also add `globalTeardown: './setup.ts'` (Playwright looks for the named `globalTeardown` export) so that servers are stopped when the run finishes.
 
 ### 4. Check for Playwright
 
@@ -158,7 +166,19 @@ Create `lantern/utils.ts` with the contents from the Generated Code Reference se
 - Create `lantern/fragments/` with a `.gitkeep` file inside it.
 - Create `lantern/journeys/` with a `.gitkeep` file inside it.
 
-### 8. Create Local README
+### 8. Create .gitignore
+
+Create `lantern/.gitignore` (or append to the project root `.gitignore`) to exclude Playwright artifacts:
+
+```gitignore
+# Playwright artifacts
+test-results/
+playwright-report/
+blob-report/
+.auth/
+```
+
+### 9. Create Local README
 
 Create `lantern/README.md` with content along these lines:
 
@@ -175,7 +195,7 @@ through your app so you can see features working without manual click-through.
 npm run lantern
 
 # Run a specific journey
-npx playwright test --config lantern/playwright.config.ts lantern/journeys/my-journey.spec.ts
+./node_modules/.bin/playwright test --config lantern/playwright.config.ts lantern/journeys/my-journey.spec.ts
 ```
 
 ## Structure
@@ -191,14 +211,14 @@ https://github.com/zpdzap/lantern
 
 Adjust the run command if the project uses a Makefile instead of npm scripts.
 
-### 9. Add a Run Script
+### 10. Add a Run Script
 
 If the project has a `package.json`, add a script entry:
 
 ```json
 {
   "scripts": {
-    "lantern": "npx playwright test --config lantern/playwright.config.ts"
+    "lantern": "playwright test --config lantern/playwright.config.ts"
   }
 }
 ```
@@ -208,12 +228,12 @@ If the project uses a `Makefile`, add a target instead:
 ```makefile
 .PHONY: lantern
 lantern:
-	npx playwright test --config lantern/playwright.config.ts
+	./node_modules/.bin/playwright test --config lantern/playwright.config.ts
 ```
 
 If both exist, add to both.
 
-### 10. Commit the Scaffolded Files
+### 11. Commit the Scaffolded Files
 
 Stage all the new lantern files and commit:
 
@@ -230,16 +250,20 @@ Do not push — let the user decide when to push.
 ```typescript
 import { defineConfig } from '@playwright/test';
 
+const isHeadless = process.env.LANTERN_HEADLESS === '1';
+
 export default defineConfig({
   testDir: './journeys',
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: 'list',
+  timeout: isHeadless ? 30_000 : 0,
+  reporter: isHeadless ? 'dot' : 'list',
   use: {
-    headless: process.env.LANTERN_HEADLESS === '1',
+    headless: isHeadless,
     baseURL: process.env.BASE_URL || 'http://localhost:3000',
     trace: 'off',
+    launchOptions: isHeadless ? { args: ['--disable-gpu', '--no-sandbox'] } : {},
   },
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
@@ -251,6 +275,8 @@ export default defineConfig({
 
 ```typescript
 import { Page } from '@playwright/test';
+
+const isHeadless = process.env.LANTERN_HEADLESS === '1';
 
 export function narrate(message: string): void {
   const divider = '-'.repeat(Math.min(message.length + 4, 60));
@@ -271,9 +297,14 @@ export async function checkpoint(
     console.log();
     message.split('\n').forEach(line => console.log(`  ${line}`));
   }
-  console.log(`\n  Paused. Inspect the browser, then resume.`);
-  console.log(`${'='.repeat(60)}\n`);
-  await page.pause();
+  if (isHeadless) {
+    console.log(`\n  [headless — checkpoint reached, continuing]`);
+    console.log(`${'='.repeat(60)}\n`);
+  } else {
+    console.log(`\n  Paused. Inspect the browser, then resume.`);
+    console.log(`${'='.repeat(60)}\n`);
+    await page.pause();
+  }
 }
 ```
 

@@ -118,6 +118,7 @@ Fragment guidelines:
 
 - Accept `page` as the first argument
 - Use API-first patterns where possible — prefer direct API calls or `page.request` over clicking through UI for setup steps. The point is to get to the interesting part fast.
+- **Auth state propagation:** When a fragment creates a user or logs in via API, the browser session needs to be authenticated too. Use `page.request` (which shares the browser's cookie jar) for API calls so cookies set by login endpoints automatically apply to subsequent `page.goto()` navigation. If the app uses token-based auth instead of cookies, store the token and set it via `page.evaluate()` or add it as a header via `page.setExtraHTTPHeaders()`.
 - Call `narrate()` to explain what setup just happened (so the user is not confused by a blank screen suddenly becoming populated)
 - Return any state the journey needs: created user email, auth tokens, resource IDs, etc.
 
@@ -156,22 +157,30 @@ Before committing, review the journey you just wrote for extraction opportunitie
 
 Run the journey headlessly to verify it works before the user ever sees it. The user's time should never be wasted on a broken journey.
 
-**Prerequisites:** The project's `lantern/playwright.config.ts` must support the `LANTERN_HEADLESS` env var (set up during scaffold). When `LANTERN_HEADLESS=1` is set, the config should override `headless` to `true`, e.g.: `headless: process.env.LANTERN_HEADLESS === '1' ? true : false`.
+**Prerequisites:** The project's `lantern/playwright.config.ts` must support the `LANTERN_HEADLESS` env var (set up during scaffold). When `LANTERN_HEADLESS=1` is set, the config overrides `headless` to `true` and sets a 30-second timeout (vs. no timeout in headed mode).
 
 **Process:**
 
-1. Run the journey headlessly:
+1. **Type-check first** — catch import errors and typos without launching a browser:
    ```bash
-   LANTERN_HEADLESS=1 npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
+   npx tsc --noEmit --esModuleInterop --moduleResolution node --module esnext lantern/journeys/[filename]
+   ```
+   If this fails, fix the TypeScript errors and re-check before proceeding. This is much faster than a full Playwright run and catches the most common first-attempt mistakes (bad imports, missing fragments, typos).
+
+2. **Run the journey headlessly** — use the local Playwright binary to avoid `npx` overhead:
+   ```bash
+   LANTERN_HEADLESS=1 ./node_modules/.bin/playwright test --config lantern/playwright.config.ts --project=chromium lantern/journeys/[filename]
    ```
 
-2. If the test **passes**, proceed to commit.
+3. If the test **passes**, proceed to commit.
 
-3. If the test **fails**:
+4. If the test **fails**:
    - Read the error output carefully
    - Fix the journey or fragment code (broken selectors, missing waits, incorrect URLs, etc.)
    - Re-run headlessly
-   - Repeat until the test passes
+   - **Maximum 3 attempts.** If the journey still fails after 3 fix-and-retry cycles, stop and inform the user:
+     > "The journey is failing after 3 attempts. Here's the latest error: [error]. This may be an issue with the app itself rather than the journey code. Here's what I've tried: [summary]."
+   - Do not loop indefinitely. The user can decide whether to investigate the app, adjust the journey scope, or skip the pre-flight.
 
 Do not skip this step. Do not commit a journey that fails headlessly. A journey that crashes in headed mode wastes the user's time and undermines trust in lantern.
 
@@ -224,7 +233,13 @@ export async function fragmentName(
   options?: { /* optional config */ }
 ): Promise<{ /* return type */ }> {
   // API-first setup (prefer over clicking through UI)
-  // ...
+  // Use page.request so cookies propagate to the browser session automatically:
+  // const res = await page.request.post('/api/login', { data: { email, password } });
+  //
+  // For token-based auth (no cookies), store the token in the browser:
+  // const { token } = await res.json();
+  // await page.evaluate(t => localStorage.setItem('auth_token', t), token);
+
   narrate('[What just happened]');
   return { /* state for the journey */ };
 }

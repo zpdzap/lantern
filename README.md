@@ -49,7 +49,7 @@ You can also **re-scaffold** at any time to update your lantern setup when the p
 
 Analyzes a ticket, diff, or conversation context and composes a journey file — a headed-browser walkthrough with reusable fragments and tour/verify checkpoints. Surveys existing fragments to avoid duplication, plans the checkpoint sequence, and writes the journey as a TypeScript file that Playwright can execute.
 
-Before committing, the author skill runs the journey headlessly to verify it works — your time is never wasted on a broken walkthrough. If the headless run fails, the agent fixes the issue and re-runs until it passes. The skill also reviews adjacent journey files for fragment extraction opportunities, keeping your lantern setup DRY as it grows.
+Before committing, the author skill type-checks the journey and runs it headlessly to verify it works — your time is never wasted on a broken walkthrough. If the headless run fails, the agent fixes the issue and re-runs (up to 3 attempts before escalating to you). The skill also reviews adjacent journey files for fragment extraction opportunities, keeping your lantern setup DRY as it grows.
 
 **Example prompts:**
 - "write a journey for ticket 12"
@@ -69,7 +69,7 @@ Before committing, the author skill runs the journey headlessly to verify it wor
 
 Executes a lantern journey in a headed browser with terminal narration. Performs pre-flight checks (dev servers running, fragment imports resolve, config exists), launches the browser, and pauses at each checkpoint via Playwright Inspector so you can inspect the state before continuing.
 
-If a journey fails during the headed run, the agent automatically switches to headless mode to debug and fix the issue — you never have to sit through error screens. Once the fix is verified headlessly, the agent re-launches the headed browser so you see the working journey.
+If a journey fails during the headed run, the agent automatically switches to headless mode to debug and fix the issue (up to 3 attempts) — you never have to sit through error screens. Once the fix is verified headlessly, the agent re-launches the headed browser so you see the working journey.
 
 **Example prompts:**
 - "run the journey"
@@ -175,6 +175,8 @@ Fragments are reusable pieces of navigation and setup that journeys compose toge
 
 **API-first pattern:** Fragments should prefer API calls and `page.request` over clicking through UI for setup steps. The goal is to get to the interesting part fast. Don't click through a five-step signup wizard when you can POST to `/api/users` directly.
 
+**Auth state propagation:** Use `page.request` for API setup calls — it shares the browser's cookie jar, so cookies set by login endpoints automatically apply to subsequent `page.goto()` navigation. For token-based auth (no cookies), store the token in the browser via `page.evaluate()` or `page.setExtraHTTPHeaders()`.
+
 **Fragment template:**
 
 ```typescript
@@ -185,8 +187,13 @@ export async function fragmentName(
   page: Page,
   options?: { /* optional config */ }
 ): Promise<{ /* return type */ }> {
-  // API-first setup (prefer over clicking through UI)
-  // e.g., await page.request.post('/api/users', { data: { ... } });
+  // API-first setup — page.request shares the browser cookie jar,
+  // so session cookies from login calls automatically apply to page navigation.
+  // e.g., await page.request.post('/api/login', { data: { email, password } });
+  //
+  // For token-based auth (no cookies):
+  // const { token } = await res.json();
+  // await page.evaluate(t => localStorage.setItem('auth_token', t), token);
 
   narrate('What just happened — e.g., Created test user and logged in');
   return { /* state for the journey — e.g., email, userId */ };
@@ -240,14 +247,14 @@ The scaffold creates two files you can customize:
 
 - **`baseURL`** — Defaults to `http://localhost:3000`. Change to match your dev server. Can also be set via the `BASE_URL` environment variable.
 - **`browserName`** — Defaults to `chromium`. Can be changed to `firefox` or `webkit` under `projects`.
-- **`timeout`** — Set to `0` for no timeout if your journeys have many checkpoints (each one waits indefinitely for user interaction).
-- **`headless`** — Set to `false` by default (lantern needs a visible browser). Don't change this unless you know what you're doing.
+- **`timeout`** — Defaults to `0` (no timeout) in headed mode so checkpoints can wait for user interaction, and `30_000` in headless mode so pre-flight tests don't hang.
+- **`headless`** — Controlled by the `LANTERN_HEADLESS` env var. Defaults to `false` (headed) for normal runs. Set `LANTERN_HEADLESS=1` for pre-flight and debug runs.
 - **`workers`** — Set to `1`. Journeys run sequentially since you're watching them.
 
 ### lantern/utils.ts
 
 - **`narrate()`** — Prints a framed message to the terminal. Customize the divider format or add color codes if you want.
-- **`checkpoint()`** — Prints a checkpoint banner and calls `page.pause()`. You can adjust the banner format, add sounds, or integrate with other notification mechanisms.
+- **`checkpoint()`** — Prints a checkpoint banner and calls `page.pause()` in headed mode. In headless mode (`LANTERN_HEADLESS=1`), it logs the checkpoint but skips `page.pause()` so pre-flight tests run to completion without hanging. You can adjust the banner format, add sounds, or integrate with other notification mechanisms.
 
 ## License
 
