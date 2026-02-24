@@ -70,10 +70,10 @@ Read the journey file and verify that any fragment imports resolve to existing f
 Execute the journey with Playwright:
 
 ```sh
-npx playwright test --config lantern/playwright.config.ts journeys/[filename]
+npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
 ```
 
-Run this command from the `lantern/` directory.
+Run this command from the project root.
 
 What happens during the run:
 
