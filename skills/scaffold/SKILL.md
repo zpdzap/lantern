@@ -237,7 +237,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    headless: false,
+    headless: process.env.LANTERN_HEADLESS === '1',
     baseURL: process.env.BASE_URL || 'http://localhost:3000',
     trace: 'off',
   },
