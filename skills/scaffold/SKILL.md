@@ -109,7 +109,7 @@ npx playwright test --config lantern/playwright.config.ts lantern/journeys/my-jo
 
 ## Learn More
 
-https://github.com/arjunsharma/lantern
+https://github.com/zpdzap/lantern
 ```
 
 Adjust the run command if the project uses a Makefile instead of npm scripts.
