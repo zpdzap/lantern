@@ -20,6 +20,10 @@ Lantern is a set of AI agent skills that follow a three-phase workflow: **scaffo
 
 Sets up lantern in a project for the first time. Creates the `lantern/` directory with a Playwright config tuned for headed single-browser operation, utility functions (`narrate` and `checkpoint`), and empty `fragments/` and `journeys/` directories ready for content. Also adds a run script to your `package.json` or `Makefile`.
 
+During setup, the scaffold asks whether lantern should **manage** your dev servers (start/stop them automatically during test setup/teardown) or treat them as **preexisting** (just check connectivity before running). Managed mode is useful when you want a single command to bring everything up; preexisting mode is better when you already have servers running in another terminal.
+
+You can also **re-scaffold** at any time to update your lantern setup when the project changes — new services, different ports, restructured directories. Re-scaffolding walks through the original setup steps again but only updates what has changed, leaving your custom journeys and fragments untouched.
+
 **Example prompts:**
 - "set up lantern"
 - "scaffold lantern"
@@ -28,9 +32,13 @@ Sets up lantern in a project for the first time. Creates the `lantern/` director
 - "lantern init"
 - "add lantern to this project"
 - "initialize lantern"
+- "re-scaffold lantern"
+- "update the lantern setup"
+- "refresh lantern config"
 
 **Produces:**
 - `lantern/playwright.config.ts`
+- `lantern/setup.ts` (server management — managed or preexisting)
 - `lantern/utils.ts`
 - `lantern/fragments/` directory
 - `lantern/journeys/` directory
@@ -40,6 +48,8 @@ Sets up lantern in a project for the first time. Creates the `lantern/` director
 ### author
 
 Analyzes a ticket, diff, or conversation context and composes a journey file — a headed-browser walkthrough with reusable fragments and tour/verify checkpoints. Surveys existing fragments to avoid duplication, plans the checkpoint sequence, and writes the journey as a TypeScript file that Playwright can execute.
+
+Before committing, the author skill runs the journey headlessly to verify it works — your time is never wasted on a broken walkthrough. If the headless run fails, the agent fixes the issue and re-runs until it passes. The skill also reviews adjacent journey files for fragment extraction opportunities, keeping your lantern setup DRY as it grows.
 
 **Example prompts:**
 - "write a journey for ticket 12"
@@ -58,6 +68,8 @@ Analyzes a ticket, diff, or conversation context and composes a journey file —
 ### run
 
 Executes a lantern journey in a headed browser with terminal narration. Performs pre-flight checks (dev servers running, fragment imports resolve, config exists), launches the browser, and pauses at each checkpoint via Playwright Inspector so you can inspect the state before continuing.
+
+If a journey fails during the headed run, the agent automatically switches to headless mode to debug and fix the issue — you never have to sit through error screens. Once the fix is verified headlessly, the agent re-launches the headed browser so you see the working journey.
 
 **Example prompts:**
 - "run the journey"
@@ -118,7 +130,7 @@ Here's a complete end-to-end example:
 
 > "Set up lantern in this project"
 
-Your agent detects the project structure, installs Playwright if needed, and creates the `lantern/` directory with config, utilities, and directory structure. This only happens once per project.
+Your agent detects the project structure, asks whether to manage servers or assume they're preexisting, installs Playwright if needed, and creates the `lantern/` directory with config, utilities, and directory structure. This only happens once per project (though you can re-scaffold later if things change).
 
 **Step 2 — Author**
 
