@@ -140,9 +140,44 @@ The journey file should:
 
 Keep the file focused. One journey = one coherent walkthrough. If the ticket touches unrelated areas, write separate journeys.
 
-### 7. Commit
+### 7. Review for Fragment Extraction Opportunities
 
-Stage the new journey file and any new fragments. Commit with a message like:
+Before committing, review the journey you just wrote for extraction opportunities:
+
+1. **Review the new journey** — Are there any multi-step sequences (navigation, setup, form-filling) that could be extracted into reusable fragments? If a sequence involves 3+ steps and feels like it would apply to other journeys, extract it.
+
+2. **Check adjacent journeys** — Read other journey files in `lantern/journeys/`. Do any of them share setup or navigation patterns with the new journey? If two or more journeys duplicate the same sequence, extract it into a fragment and update all of them to use it.
+
+3. **Check existing e2e tests** — If the project has existing e2e tests (e.g., in a `tests/` or `e2e/` directory), scan them for test helpers or setup utilities that could be adapted into lantern fragments. Test helpers for authentication, data seeding, or API setup are common candidates.
+
+4. **Extract if warranted** — If extraction opportunities are found, create the new fragment(s) in `lantern/fragments/` following the fragment file template, and update the journey file(s) to import and use them. Do not extract for the sake of it — only extract if the pattern genuinely appears in or will appear in multiple journeys.
+
+### 8. Headless Pre-flight Test
+
+Run the journey headlessly to verify it works before the user ever sees it. The user's time should never be wasted on a broken journey.
+
+**Prerequisites:** The project's `lantern/playwright.config.ts` must support the `LANTERN_HEADLESS` env var (set up during scaffold). When `LANTERN_HEADLESS=1` is set, the config should override `headless` to `true`, e.g.: `headless: process.env.LANTERN_HEADLESS === '1' ? true : false`.
+
+**Process:**
+
+1. Run the journey headlessly:
+   ```bash
+   LANTERN_HEADLESS=1 npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
+   ```
+
+2. If the test **passes**, proceed to commit.
+
+3. If the test **fails**:
+   - Read the error output carefully
+   - Fix the journey or fragment code (broken selectors, missing waits, incorrect URLs, etc.)
+   - Re-run headlessly
+   - Repeat until the test passes
+
+Do not skip this step. Do not commit a journey that fails headlessly. A journey that crashes in headed mode wastes the user's time and undermines trust in lantern.
+
+### 9. Commit
+
+Stage the new journey file and any new or updated fragments. Commit with a message like:
 
 ```
 add lantern journey for [feature/ticket description]
