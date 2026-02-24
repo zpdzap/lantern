@@ -4,9 +4,11 @@ description: >
   Use when the user wants to set up lantern in a project for the first time.
   Triggers: first mention of lantern in a project, "set up lantern", "scaffold
   lantern", "I want to preview features in the browser", or no lantern directory
-  detected. Creates a lantern directory with Playwright config, utilities, and
-  directory structure for fragments and journeys. Lantern is separate from the
-  project's test suite — it drives a headed browser for visual verification.
+  detected. Also handles re-scaffolding: "re-scaffold lantern", "update the
+  lantern setup", "refresh lantern config". Creates a lantern directory with
+  Playwright config, utilities, and directory structure for fragments and
+  journeys. Lantern is separate from the project's test suite — it drives a
+  headed browser for visual verification.
 ---
 
 # Scaffold Lantern
@@ -51,7 +53,82 @@ Place the `lantern/` directory using these heuristics:
 - **Simple project (no e2e, no monorepo):** place `lantern/` at the project root.
 - **Ambiguous layout:** ask the user where they want it before proceeding.
 
-### 3. Check for Playwright
+### 3. Determine Server Management
+
+Ask the user:
+
+> How should lantern handle dev servers? Options:
+> - **Managed:** Lantern starts and stops dev servers as part of test setup/teardown (you'll configure the start commands)
+> - **Preexisting:** Lantern assumes dev servers are already running and just checks connectivity
+
+**If managed:** Ask the user what commands start each server (backend, frontend) and what ports to expect. Create `lantern/setup.ts` that starts the servers before tests, waits for readiness, and tears them down after. Wire this into `playwright.config.ts` via the `globalSetup` option.
+
+```typescript
+// lantern/setup.ts — managed variant
+import { spawn, ChildProcess } from 'child_process';
+import { FullConfig } from '@playwright/test';
+
+const servers: ChildProcess[] = [];
+
+async function waitForReady(url: string, timeoutMs = 30_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+    } catch {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error(`Server at ${url} not ready after ${timeoutMs}ms`);
+}
+
+async function globalSetup(config: FullConfig) {
+  // Replace with actual start commands and ports from the user
+  const backend = spawn('npm', ['run', 'dev:backend'], { stdio: 'pipe', shell: true });
+  servers.push(backend);
+  await waitForReady('http://localhost:8080/health');
+
+  const frontend = spawn('npm', ['run', 'dev:frontend'], { stdio: 'pipe', shell: true });
+  servers.push(frontend);
+  await waitForReady(config.projects[0].use.baseURL || 'http://localhost:3000');
+}
+
+async function globalTeardown() {
+  for (const proc of servers) {
+    proc.kill('SIGTERM');
+  }
+}
+
+export default globalSetup;
+export { globalTeardown };
+```
+
+**If preexisting:** Create `lantern/setup.ts` that does a pre-flight connectivity check and fails with a clear message if the app isn't reachable.
+
+```typescript
+// lantern/setup.ts — preexisting variant
+import { FullConfig } from '@playwright/test';
+
+async function globalSetup(config: FullConfig) {
+  const baseURL = config.projects[0].use.baseURL || 'http://localhost:3000';
+  try {
+    const res = await fetch(baseURL);
+    if (!res.ok) {
+      throw new Error(`Server responded with ${res.status}`);
+    }
+  } catch (err) {
+    console.error(`\n  Lantern pre-flight check failed: ${baseURL} is not reachable.`);
+    console.error(`  Start your dev servers before running lantern.\n`);
+    process.exit(1);
+  }
+}
+
+export default globalSetup;
+```
+
+In both cases, add `globalSetup: './setup.ts'` to the Playwright config (and `globalTeardown` for the managed variant).
+
+### 4. Check for Playwright
 
 Check if `@playwright/test` is already in the project's `devDependencies`.
 
@@ -68,20 +145,20 @@ If Playwright **is** already installed, skip the npm install but still ensure ch
 npx playwright install chromium
 ```
 
-### 4. Create Playwright Config
+### 5. Create Playwright Config
 
 Create `lantern/playwright.config.ts` with the contents from the Generated Code Reference section below.
 
-### 5. Create Utilities
+### 6. Create Utilities
 
 Create `lantern/utils.ts` with the contents from the Generated Code Reference section below.
 
-### 6. Create Directory Structure
+### 7. Create Directory Structure
 
 - Create `lantern/fragments/` with a `.gitkeep` file inside it.
 - Create `lantern/journeys/` with a `.gitkeep` file inside it.
 
-### 7. Create Local README
+### 8. Create Local README
 
 Create `lantern/README.md` with content along these lines:
 
@@ -114,7 +191,7 @@ https://github.com/zpdzap/lantern
 
 Adjust the run command if the project uses a Makefile instead of npm scripts.
 
-### 8. Add a Run Script
+### 9. Add a Run Script
 
 If the project has a `package.json`, add a script entry:
 
@@ -136,7 +213,7 @@ lantern:
 
 If both exist, add to both.
 
-### 9. Commit the Scaffolded Files
+### 10. Commit the Scaffolded Files
 
 Stage all the new lantern files and commit:
 
@@ -199,6 +276,18 @@ export async function checkpoint(
   await page.pause();
 }
 ```
+
+## Re-Scaffolding
+
+The user can request re-scaffolding at any time. Triggers: "re-scaffold lantern", "update the lantern setup", "refresh lantern config".
+
+When re-scaffolding, follow this process:
+
+1. **Walk through the original setup steps again** — re-detect the project structure, confirm the lantern directory location, and re-ask about server management preferences.
+2. **Compare current project structure with existing lantern setup** — check if the project layout has changed (new apps in a monorepo, moved directories, updated frameworks).
+3. **Check existing journey/fragment files for consistency** — verify that existing fragments and journeys still match current project patterns (routes, selectors, component names).
+4. **Determine what needs updating** — identify config changes (baseURL, server commands, ports), new fragments to extract based on new features, and setup.ts updates.
+5. **Update only what's changed** — do not overwrite custom modifications to journeys, fragments, or utils without explicitly asking the user first. Show a summary of proposed changes and get confirmation before applying.
 
 ## Do NOT
 
