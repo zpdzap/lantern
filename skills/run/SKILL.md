@@ -51,13 +51,14 @@ If either is missing, stop and suggest running `lantern:scaffold` first.
 
 **Check dev servers:**
 
-Attempt a fetch to the `baseURL` configured in `lantern/playwright.config.ts` (default: `http://localhost:3000`). Check the config file for a custom `baseURL` or `BASE_URL` environment variable.
+First, determine how servers are managed by checking for `lantern/setup.ts` (or `lantern/global-setup.ts`):
 
-If the server is not reachable, warn the user:
+- **Managed servers** (setup file exists and contains `webServer` config or server start/stop logic): The Playwright config handles server lifecycle automatically. Note this to the user: *"Servers will be started automatically by the test harness."* No connectivity check needed.
+- **Preexisting servers** (no setup file, or setup file does not manage servers): Attempt a fetch to the `baseURL` configured in `lantern/playwright.config.ts` (default: `http://localhost:3000`). Check the config file for a custom `baseURL` or `BASE_URL` environment variable. If the server is not reachable, warn the user:
 
 > "Servers don't appear to be running on [url]. Start your dev servers and try again."
 
-Do **not** attempt to start servers. The user manages their own dev environment.
+Do **not** attempt to start servers yourself when using preexisting server configuration. The user manages their own dev environment.
 
 **Check journey imports:**
 
@@ -95,19 +96,31 @@ Report success. Something like:
 
 **If the test failed** (Playwright reported an error):
 
-Show the error output and suggest a fix. Common patterns:
+Do **not** ask the user to debug. Handle it automatically:
 
-- Element not found → selector may be wrong, or the page did not load as expected
-- Navigation timeout → server may be slow or the URL is incorrect
-- Assertion error → the page state did not match expectations
+1. **Inform the user:** *"The journey hit an error. Debugging headlessly — one moment."*
 
-**Then ask the user:**
+2. **Reproduce headlessly:** Re-run the journey in headless mode to capture the full error output without making the user sit through it:
 
-> "Want to re-run, modify the journey, or move on?"
+   ```sh
+   LANTERN_HEADLESS=1 npx playwright test --config lantern/playwright.config.ts lantern/journeys/[filename]
+   ```
 
-- **Re-run** — execute the same journey again (useful after a quick fix to the app)
-- **Modify** — switch to `lantern:author` to edit the journey or fragments
-- **Move on** — done with this walkthrough
+3. **Analyze and fix:** Read the error output and diagnose the issue. Common patterns:
+
+   - Element not found → selector may be wrong, or the page did not load as expected
+   - Navigation timeout → server may be slow or the URL is incorrect
+   - Assertion error → the page state did not match expectations
+
+   Fix the journey file or fragment code as needed.
+
+4. **Verify headlessly:** Re-run in headless mode (`LANTERN_HEADLESS=1`) to confirm the fix works. If it still fails, repeat the analyze-and-fix cycle.
+
+5. **Re-launch headed:** Once the test passes headlessly, re-run in normal headed mode so the user sees the working journey in the browser.
+
+The key principle: the user should never sit through debugging. The agent handles all debugging iterations in headless mode and only re-launches the headed browser once everything works.
+
+If the fix requires changes outside the journey/fragment code (e.g. the app itself has a bug), inform the user what was found and suggest next steps instead of modifying application code.
 
 ## Troubleshooting
 
