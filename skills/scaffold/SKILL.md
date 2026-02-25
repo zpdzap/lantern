@@ -202,7 +202,7 @@ npm run lantern
 
 - `journeys/` — end-to-end visual walkthroughs of features
 - `fragments/` — reusable page interaction snippets
-- `utils.ts` — narrate() and checkpoint() helpers
+- `utils.ts` — navigate(), narrate(), and checkpoint() helpers
 
 ## Learn More
 
@@ -277,6 +277,17 @@ export default defineConfig({
 import { Page } from '@playwright/test';
 
 const isHeadless = process.env.LANTERN_HEADLESS === '1';
+
+/**
+ * Navigate to a URL and wait for the page to be fully loaded.
+ * Always use this instead of raw page.goto() — bundlers like Metro/Webpack
+ * can take several seconds on first load (especially in headed mode),
+ * and raw goto() often returns before the app has rendered.
+ */
+export async function navigate(page: Page, url: string): Promise<void> {
+  await page.goto(url);
+  await page.waitForLoadState('networkidle');
+}
 
 export function narrate(message: string): void {
   const divider = '-'.repeat(Math.min(message.length + 4, 60));

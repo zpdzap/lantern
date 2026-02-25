@@ -118,7 +118,7 @@ Fragment guidelines:
 
 - Accept `page` as the first argument
 - Use API-first patterns where possible — prefer direct API calls or `page.request` over clicking through UI for setup steps. The point is to get to the interesting part fast.
-- **Auth state propagation:** When a fragment creates a user or logs in via API, the browser session needs to be authenticated too. Use `page.request` (which shares the browser's cookie jar) for API calls so cookies set by login endpoints automatically apply to subsequent `page.goto()` navigation. If the app uses token-based auth instead of cookies, store the token and set it via `page.evaluate()` or add it as a header via `page.setExtraHTTPHeaders()`.
+- **Auth state propagation:** When a fragment creates a user or logs in via API, the browser session needs to be authenticated too. Use `page.request` (which shares the browser's cookie jar) for API calls so cookies set by login endpoints automatically apply to subsequent `navigate(page, '/')` calls. If the app uses token-based auth instead of cookies, store the token and set it via `page.evaluate()` or add it as a header via `page.setExtraHTTPHeaders()`.
 - Call `narrate()` to explain what setup just happened (so the user is not confused by a blank screen suddenly becoming populated)
 - Return any state the journey needs: created user email, auth tokens, resource IDs, etc.
 
@@ -198,7 +198,7 @@ Do not push — let the user decide when to push.
 
 ```typescript
 import { test } from '@playwright/test';
-import { narrate, checkpoint } from '../utils';
+import { narrate, checkpoint, navigate } from '../utils';
 // import fragments as needed
 
 test('[Context]: [Description]', async ({ page }) => {
@@ -206,9 +206,9 @@ test('[Context]: [Description]', async ({ page }) => {
   narrate('Setting up: [what setup does]...');
   // const { ... } = await someFragment(page);
 
-  // Navigate to feature
+  // Navigate to feature — ALWAYS use navigate(), never raw page.goto()
   narrate('[Transitional context]...');
-  // await page.goto('/...');
+  await navigate(page, '/');
 
   // Tour checkpoint — new screen, just look at it
   await checkpoint(page, '[Short label]');
@@ -226,7 +226,7 @@ test('[Context]: [Description]', async ({ page }) => {
 
 ```typescript
 import { Page } from '@playwright/test';
-import { narrate } from '../utils';
+import { narrate, navigate } from '../utils';
 
 export async function fragmentName(
   page: Page,
@@ -240,6 +240,9 @@ export async function fragmentName(
   // const { token } = await res.json();
   // await page.evaluate(t => localStorage.setItem('auth_token', t), token);
 
+  // Navigate using navigate(), never raw page.goto()
+  await navigate(page, '/');
+
   narrate('[What just happened]');
   return { /* state for the journey */ };
 }
@@ -247,10 +250,11 @@ export async function fragmentName(
 
 ## Common Mistakes
 
+- **Using raw `page.goto()` instead of `navigate()`** — Always use `navigate(page, url)` from `../utils`. It wraps `page.goto()` with `waitForLoadState('networkidle')`, which prevents flaky "element not found" errors caused by bundlers (Metro, Webpack) that haven't finished loading when `goto()` returns. This is especially critical in headed mode where the first page load is slower.
 - **Using `page.waitForTimeout()`** — Playwright has built-in auto-waiting. Use `toBeVisible()`, `waitForResponse()`, `waitForURL()`, or other auto-waiting methods. Hard timeouts are flaky and slow.
 - **Too many checkpoints** — 3-6 per journey is the sweet spot. More than that becomes tedious for the user. If you need more, split into multiple journeys.
 - **Mixing setup into checkpoints** — Setup steps (logging in, seeding data, navigating to a page) should be narrated, not paused on. The user does not need to inspect the login screen unless that is what changed.
-- **Hardcoding URLs** — Use the `baseURL` from Playwright config. Write `page.goto('/')` not `page.goto('http://localhost:3000/')`.
+- **Hardcoding URLs** — Use the `baseURL` from Playwright config. Write `navigate(page, '/')` not `navigate(page, 'http://localhost:3000/')`.
 - **Brittle selectors** — Prefer `data-testid` attributes or accessible roles (`getByRole`, `getByLabel`) over CSS class selectors or deeply nested DOM paths.
 - **Fragments that are too specific** — A fragment should be reusable across multiple journeys. If it only applies to one journey, inline it instead of extracting.
 - **Forgetting to narrate transitions** — Without narration, the user sees the browser jump between pages with no explanation. A short `narrate()` call before navigation keeps the walkthrough coherent.
