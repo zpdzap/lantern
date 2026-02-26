@@ -61,14 +61,18 @@ Ask the user:
 > - **Managed:** Lantern starts and stops dev servers as part of test setup/teardown (you'll configure the start commands)
 > - **Preexisting:** Lantern assumes dev servers are already running and just checks connectivity
 
-**If managed:** Ask the user what commands start each server (backend, frontend) and what ports to expect. Create `lantern/setup.ts` that starts the servers before tests, waits for readiness, and tears them down after. Wire this into `playwright.config.ts` via the `globalSetup` option.
+**If managed:** Ask the user what commands start each server (backend, frontend) and what ports to expect. Create **two separate files** — `lantern/setup.ts` and `lantern/teardown.ts` — and wire them into `playwright.config.ts` via the `globalSetup` and `globalTeardown` options.
+
+**Why separate files:** Playwright's `globalSetup` and `globalTeardown` both use the **default export** of their respective files. If you point both at the same file, only the default export runs for both — meaning teardown never executes. Additionally, `globalSetup` and `globalTeardown` run in separate module contexts, so module-level variables (like a `servers` array) are not shared between them. Use a PID file to pass process IDs from setup to teardown.
 
 ```typescript
 // lantern/setup.ts — managed variant
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { FullConfig } from '@playwright/test';
+import path from 'path';
+import fs from 'fs';
 
-const servers: ChildProcess[] = [];
+const pidFile = path.join(__dirname, '.lantern-pids.json');
 
 async function waitForReady(url: string, timeoutMs = 30_000): Promise<void> {
   const start = Date.now();
@@ -82,33 +86,64 @@ async function waitForReady(url: string, timeoutMs = 30_000): Promise<void> {
   throw new Error(`Server at ${url} not ready after ${timeoutMs}ms`);
 }
 
+function killPreviousServers() {
+  if (!fs.existsSync(pidFile)) return;
+  try {
+    const pids: number[] = JSON.parse(fs.readFileSync(pidFile, 'utf-8'));
+    for (const pid of pids) {
+      try { process.kill(-pid, 'SIGTERM'); } catch {}
+    }
+  } catch {}
+  try { fs.unlinkSync(pidFile); } catch {}
+}
+
 async function globalSetup(config: FullConfig) {
+  // Kill any leftover servers from a previous run
+  killPreviousServers();
+
   // Replace with actual start commands and ports from the user
   // detached: true creates a process group so teardown can kill the entire tree
   const backend = spawn('npm', ['run', 'dev:backend'], {
     stdio: 'pipe', shell: true, detached: true,
   });
-  servers.push(backend);
-  await waitForReady('http://localhost:8080/health');
+  backend.unref();
 
   const frontend = spawn('npm', ['run', 'dev:frontend'], {
     stdio: 'pipe', shell: true, detached: true,
   });
-  servers.push(frontend);
+  frontend.unref();
+
+  // Save PIDs so teardown (separate process) can kill them
+  const pids = [backend.pid, frontend.pid].filter(Boolean);
+  fs.writeFileSync(pidFile, JSON.stringify(pids));
+
+  await waitForReady('http://localhost:8080/health');
   await waitForReady(config.projects[0].use.baseURL || 'http://localhost:3000');
 }
 
+export default globalSetup;
+```
+
+```typescript
+// lantern/teardown.ts — managed variant
+import path from 'path';
+import fs from 'fs';
+
+const pidFile = path.join(__dirname, '.lantern-pids.json');
+
 async function globalTeardown() {
-  for (const proc of servers) {
-    // Kill the entire process group (negative PID) to catch child processes
-    if (proc.pid) {
-      try { process.kill(-proc.pid, 'SIGTERM'); } catch {}
-    }
+  if (fs.existsSync(pidFile)) {
+    try {
+      const pids: number[] = JSON.parse(fs.readFileSync(pidFile, 'utf-8'));
+      for (const pid of pids) {
+        try { process.kill(-pid, 'SIGTERM'); } catch {}
+      }
+    } catch {}
+    try { fs.unlinkSync(pidFile); } catch {}
   }
 }
 
-export default globalSetup;
-export { globalTeardown };
+export default globalTeardown;
 ```
 
 **If preexisting:** Create `lantern/setup.ts` that does a pre-flight connectivity check and fails with a clear message if the app isn't reachable.
@@ -134,7 +169,7 @@ async function globalSetup(config: FullConfig) {
 export default globalSetup;
 ```
 
-In both cases, add `globalSetup: './setup.ts'` to the Playwright config. For the managed variant, also add `globalTeardown: './setup.ts'` (Playwright looks for the named `globalTeardown` export) so that servers are stopped when the run finishes.
+In both cases, add `globalSetup: './setup.ts'` to the Playwright config. For the managed variant, also add `globalTeardown: './teardown.ts'` so that servers are stopped when the run finishes.
 
 ### 4. Check for Playwright
 
@@ -176,6 +211,9 @@ test-results/
 playwright-report/
 blob-report/
 .auth/
+
+# Lantern runtime
+.lantern-pids.json
 ```
 
 ### 9. Create Local README
