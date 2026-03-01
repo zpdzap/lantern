@@ -13,7 +13,7 @@ description: >
 
 ## Overview
 
-This skill executes a lantern journey in a headed browser with terminal narration. The user watches the browser while the terminal provides context at each step. At every checkpoint, the browser pauses via Playwright Inspector so the user can inspect the state, then click resume to continue.
+This skill executes a lantern journey in a headed browser with terminal narration. The user watches the browser while the terminal provides context at each step. At every checkpoint, an in-page overlay appears showing the checkpoint label, message, and a Continue button. The user can drag the overlay out of the way, inspect the page, then click Continue to advance.
 
 ## When to Use
 
@@ -82,8 +82,8 @@ What happens during the run:
 
 - The browser opens in headed mode (non-headless, as configured in `playwright.config.ts`)
 - The terminal displays narration messages as the test progresses
-- At each `checkpoint()` call, the terminal shows the checkpoint label and description, then `page.pause()` activates the Playwright Inspector
-- The user inspects the browser, then clicks the resume button in the Playwright Inspector to continue
+- At each `checkpoint()` call, the terminal shows the checkpoint label and description, and a draggable overlay appears on the page with the label, message, and a Continue button
+- The user inspects the browser (dragging the overlay out of the way if needed), then clicks Continue in the overlay to advance
 - The journey proceeds through all checkpoints until completion
 
 **Skipping to a specific checkpoint:** If the user only wants to see a particular checkpoint (e.g., "just show me checkpoint 3"), use Playwright's `--grep` flag with the checkpoint label:
@@ -146,11 +146,11 @@ Check that `headless: false` is set in `lantern/playwright.config.ts` under `use
 **"Cannot find module '../fragments/...'"**
 The journey references a fragment file that does not exist. Either create the fragment with `lantern:author` or remove the import from the journey file.
 
-**"page.pause() not working"**
-Playwright Inspector requires a headed browser. Verify that `headless: false` is set in the Playwright config. Also ensure `PWDEBUG` is not set to `0` in the environment, as that disables the inspector.
+**"Overlay not appearing"**
+The in-page overlay requires a headed browser. Verify that `headless: false` is set in the Playwright config (this is the default when `LANTERN_HEADLESS` is not set). If the page navigates away immediately after a checkpoint is expected, the overlay may be injected and then lost — check that there are no competing navigations.
 
 **"Test timed out"**
-The default config uses `timeout: 0` in headed mode (no timeout, since checkpoints wait for user interaction) and `timeout: 30_000` in headless mode. If you're hitting timeouts in headed mode, verify that `LANTERN_HEADLESS` is not set in your environment. For headless pre-flight timeouts, check that dev servers are responding — a slow or unresponsive server can cause navigation timeouts before the first checkpoint is reached.
+The default config uses `timeout: 0` in headed mode (no timeout, since checkpoints wait for the user to click Continue in the overlay) and `timeout: 30_000` in headless mode. If you're hitting timeouts in headed mode, verify that `LANTERN_HEADLESS` is not set in your environment. For headless pre-flight timeouts, check that dev servers are responding — a slow or unresponsive server can cause navigation timeouts before the first checkpoint is reached.
 
 **"Error: browserType.launch: Executable doesn't exist"**
 Chromium is not installed. Run:

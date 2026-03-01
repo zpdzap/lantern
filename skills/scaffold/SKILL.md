@@ -316,6 +316,8 @@ import { Page } from '@playwright/test';
 
 const isHeadless = process.env.LANTERN_HEADLESS === '1';
 
+let stepNumber = 0;
+
 /**
  * Navigate to a URL and wait for the page to be fully loaded.
  * Always use this instead of raw page.goto() — bundlers like Metro/Webpack
@@ -339,7 +341,8 @@ export async function checkpoint(
   label: string,
   message?: string
 ): Promise<void> {
-  const header = `[Checkpoint: ${label}]`;
+  stepNumber++;
+  const header = `[Checkpoint ${stepNumber}: ${label}]`;
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  ${header}`);
   if (message) {
@@ -350,10 +353,162 @@ export async function checkpoint(
     console.log(`\n  [headless — checkpoint reached, continuing]`);
     console.log(`${'='.repeat(60)}\n`);
   } else {
-    console.log(`\n  Paused. Inspect the browser, then resume.`);
+    console.log(`\n  Paused. Inspect the browser, then click Continue.`);
     console.log(`${'='.repeat(60)}\n`);
-    await page.pause();
+    await showOverlay(page, stepNumber, label, message);
   }
+}
+
+async function showOverlay(
+  page: Page,
+  step: number,
+  label: string,
+  message?: string
+): Promise<void> {
+  await page.evaluate(
+    ({ step, label, message }) => {
+      return new Promise<void>((resolve) => {
+        // Remove any existing overlay
+        document.getElementById('lantern-overlay')?.remove();
+
+        // Recall last dragged position
+        const saved = (window as any).__lanternPos as
+          | { left: string; top: string }
+          | undefined;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'lantern-overlay';
+        overlay.style.cssText = `
+          position: fixed;
+          ${saved ? `left: ${saved.left}; top: ${saved.top};` : `right: 24px; top: 50%; transform: translateY(-50%);`}
+          z-index: 2147483647;
+          background: rgba(15, 15, 25, 0.92);
+          backdrop-filter: blur(12px);
+          color: #f0f0f0;
+          border-radius: 12px;
+          padding: 20px 24px;
+          max-width: 360px;
+          min-width: 280px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          cursor: default;
+          user-select: none;
+        `;
+
+        // Continue button (at top for consistent mouse position)
+        const btn = document.createElement('button');
+        btn.style.cssText = `
+          display: block;
+          width: 100%;
+          padding: 10px 16px;
+          background: #4f8cff;
+          color: #ffffff;
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s;
+          margin-bottom: 16px;
+        `;
+        btn.textContent = 'Continue →';
+        overlay.appendChild(btn);
+
+        // Step badge
+        const badge = document.createElement('div');
+        badge.style.cssText = `
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 1.5px;
+          color: rgba(255, 255, 255, 0.45);
+          margin-bottom: 8px;
+        `;
+        badge.textContent = 'Step ' + step;
+        overlay.appendChild(badge);
+
+        // Label
+        const title = document.createElement('div');
+        title.style.cssText = `
+          font-size: 16px;
+          font-weight: 600;
+          color: #ffffff;
+          margin-bottom: ${message ? '12px' : '0'};
+          line-height: 1.3;
+        `;
+        title.textContent = label;
+        overlay.appendChild(title);
+
+        // Message (if provided)
+        if (message) {
+          const body = document.createElement('div');
+          body.style.cssText = `
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.5;
+            white-space: pre-wrap;
+          `;
+          body.textContent = message;
+          overlay.appendChild(body);
+        }
+        btn.addEventListener('mouseenter', () => {
+          btn.style.background = '#3a7aef';
+        });
+        btn.addEventListener('mouseleave', () => {
+          btn.style.background = '#4f8cff';
+        });
+        btn.addEventListener('click', () => {
+          // Save position for next checkpoint
+          if (overlay.style.left && overlay.style.left !== 'auto') {
+            (window as any).__lanternPos = {
+              left: overlay.style.left,
+              top: overlay.style.top,
+            };
+          }
+          overlay.remove();
+          resolve();
+        });
+
+        // Drag behavior
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        overlay.addEventListener('mousedown', (e) => {
+          if (e.target === btn) return;
+          isDragging = true;
+          const rect = overlay.getBoundingClientRect();
+          dragOffsetX = e.clientX - rect.left;
+          dragOffsetY = e.clientY - rect.top;
+          overlay.style.cursor = 'grabbing';
+          // Switch from right-anchored to left-anchored positioning for dragging
+          overlay.style.left = rect.left + 'px';
+          overlay.style.top = rect.top + 'px';
+          overlay.style.right = 'auto';
+          overlay.style.transform = 'none';
+          e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+          if (!isDragging) return;
+          overlay.style.left = (e.clientX - dragOffsetX) + 'px';
+          overlay.style.top = (e.clientY - dragOffsetY) + 'px';
+          e.preventDefault();
+        });
+
+        document.addEventListener('mouseup', () => {
+          if (isDragging) {
+            isDragging = false;
+            overlay.style.cursor = 'default';
+          }
+        });
+
+        document.body.appendChild(overlay);
+      });
+    },
+    { step, label, message }
+  );
 }
 ```
 
